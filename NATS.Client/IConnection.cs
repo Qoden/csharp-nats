@@ -27,6 +27,8 @@ namespace NATS.Client
         /// is connected, otherwise <c>null</c>.
         /// </summary>
         string ConnectedId { get; }
+        
+        Task InitializationTask { get; }
 
         /// <summary>
         /// Gets an array of known server URLs for this instance.

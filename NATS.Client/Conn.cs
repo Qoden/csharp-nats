@@ -136,6 +136,8 @@ namespace NATS.Client
         private Dictionary<string, InFlightRequest> waitingRequests = 
             new Dictionary<string, InFlightRequest>(StringComparer.OrdinalIgnoreCase);
 
+        private TaskCompletionSource<bool> _initialized;
+
         // Handles in-flight requests when using the new-style request/reply behavior
         private sealed class InFlightRequest
         {
@@ -527,6 +529,7 @@ namespace NATS.Client
                     return client.Connected;
                 }
             }
+            
 
             internal bool DataAvailable
             {
@@ -700,6 +703,8 @@ namespace NATS.Client
         /// <see cref="Connection"/>.</param>
         internal Connection(Options options)
         {
+            _initialized = new TaskCompletionSource<bool>();
+            
             opts = new Options(options);
             pongs = createPongs();
 
@@ -939,6 +944,8 @@ namespace NATS.Client
             // wait for both threads to start before continuing.
             flusherStartEvent.WaitOne(60000);
             readLoopStartEvent.WaitOne(60000);
+            
+            _initialized.SetResult(true);
         }
 
         /// <summary>
@@ -958,6 +965,8 @@ namespace NATS.Client
                 }
             }
         }
+
+        public Task InitializationTask => _initialized.Task;
 
         /// <summary>
         /// Gets the server ID of the NATS server to which this instance
