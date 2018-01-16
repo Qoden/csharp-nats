@@ -1,6 +1,7 @@
 ﻿// Copyright 2015 Apcera Inc. All rights reserved.
 
 using System;
+using System.Diagnostics;
 using System.Text;
 
 namespace NATS.Client
@@ -68,6 +69,8 @@ namespace NATS.Client
             : this(subject, null, null)
         {
         }
+
+        public long ReceivedAt = Stopwatch.GetTimestamp();
 
         internal Msg(MsgArg arg, Subscription s, byte[] payload, long length)
         {

@@ -188,7 +188,7 @@ namespace NATSUnitTests
 
         internal static String GetFullCertificatePath(string certificateName)
         {
-            return GetConfigDir() + "\\certs\\" + certificateName;
+            return GetConfigDir() + Path.DirectorySeparatorChar + "certs" + Path.DirectorySeparatorChar + certificateName;
         }
 
         internal static void CleanupExistingServers()
