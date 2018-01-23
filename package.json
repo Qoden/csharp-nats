@@ -1,0 +1,8 @@
+{
+  "name": "csharp-nats-streaming",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "publish": "dotnet pack NATS.CLIENT -c Release && nuget push NATS.CLIENT/bin/Release/Qoden.NATS.CLIENT.*.nupkg -Source MyExchange"
+  }
+}
