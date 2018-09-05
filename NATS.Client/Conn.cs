@@ -1,4 +1,15 @@
-﻿// Copyright 2015-2017 Apcera Inc. All rights reserved.
+﻿// Copyright 2015-2018 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.Collections.Generic;
@@ -391,7 +402,8 @@ namespace NATS.Client
                     }
 
                     client = new TcpClient();
-                    if (!client.ConnectAsync(s.url.Host, s.url.Port).Wait(TimeSpan.FromMilliseconds(timeoutMillis)))
+                    var task = client.ConnectAsync(s.url.Host, s.url.Port).ContinueWith(t => t.Exception);
+                    if (!task.Wait(TimeSpan.FromMilliseconds(timeoutMillis)))
                     {
                         client = null;
                         throw new NATSConnectionException("timeout");
@@ -523,10 +535,11 @@ namespace NATS.Client
             {
                 get
                 {
-                    if (client == null)
+                    var tmp = client;
+                    if (tmp == null)
                         return false;
 
-                    return client.Connected;
+                    return tmp.Connected;
                 }
             }
             
@@ -535,10 +548,11 @@ namespace NATS.Client
             {
                 get
                 {
-                    if (stream == null)
+                    var tmp = stream;
+                    if (tmp == null)
                         return false;
 
-                    return stream.DataAvailable;
+                    return tmp.DataAvailable;
                 }
             }
 
@@ -2123,20 +2137,19 @@ namespace NATS.Client
             }
 
             info = ServerInfo.CreateFromJson(json);
-            var servers = info.connectURLs;
-            if (servers != null)
+            var discoveredUrls = info.connectURLs;
+ 
+            // Note about pool randomization: when the pool was first created,
+            // it was randomized (if allowed). We keep the order the same (removing
+            // implicit servers that are no longer sent to us). New URLs are sent
+            // to us in no specific order so don't need extra randomization.
+            if (discoveredUrls != null && discoveredUrls.Length > 0)
             {
-                if (!opts.NoRandomize && servers.Length > 1)
-                {
-                    // If randomization is allowed, shuffle the received array, 
-                    // not the entire pool. We want to preserve the pool's
-                    // order up to this point (this would otherwise be 
-                    // problematic for the (re)connect loop).
-                    servers = (string[])info.connectURLs.Clone();
-                    ServerPool.shuffle<string>(servers);
-                }
-
-                var serverAdded = srvPool.Add(servers, true);
+                // Prune out implicit servers no longer needed.  
+                // The Add in srvPool is idempotent, so just add
+                // the entire list.
+                srvPool.PruneOutdatedServers(discoveredUrls);
+                var serverAdded = srvPool.Add(discoveredUrls, true);
                 if (notifyOnServerAddition && serverAdded)
                 {
                     scheduleConnEvent(opts.ServerDiscoveredEventHandler);
@@ -2408,6 +2421,8 @@ namespace NATS.Client
 
         internal virtual Msg request(string subject, byte[] data, int offset, int count, int timeout)
         {
+            Msg result = null;
+
             if (string.IsNullOrWhiteSpace(subject))
             {
                 throw new NATSBadSubscriptionException();
@@ -2427,14 +2442,28 @@ namespace NATS.Client
                 {
                     Flush(timeout > 0 ? timeout : DEFAULT_FLUSH_TIMEOUT);
                     request.Waiter.Task.Wait(timeout);
+                    result = request.Waiter.Task.Result;
                 }
-                catch (NATSTimeoutException)
+                catch (AggregateException ae)
                 {
-                    removeTimedoutRequest(request.Id);
+                    foreach (var e in ae.Flatten().InnerExceptions)
+                    {
+                        // we *should* only have one, and it should be
+                        // a NATS timeout exception.
+                        throw e;
+                    }
+                }
+                catch
+                {
+                    // Could be a timeout or exception from the flush.
                     throw;
                 }
+                finally
+                {
+                    removeOutstandingRequest(request.Id);
+                }
 
-                return request.Waiter.Task.Result;
+                return result;
             }
             else
             {
@@ -2445,6 +2474,7 @@ namespace NATS.Client
         private InFlightRequest setupRequest(int timeout, CancellationToken token)
         {
             InFlightRequest request = new InFlightRequest(token, timeout);
+            request.Waiter.Task.ContinueWith(t => t.Exception);
             bool createSub = false;
             lock (mu)
             {
@@ -2464,7 +2494,7 @@ namespace NATS.Client
 
                 request.Id = (nextRequestId++).ToString(CultureInfo.InvariantCulture);
 
-                request.Token.Register(() => removeTimedoutRequest(request.Id));
+                request.Token.Register(() => removeOutstandingRequest(request.Id));
 
                 waitingRequests.Add(
                     request.Id,
@@ -2496,7 +2526,7 @@ namespace NATS.Client
             }
             catch
             {
-                removeTimedoutRequest(request.Id);
+                removeOutstandingRequest(request.Id);
                 throw;
             }
 
@@ -2536,7 +2566,7 @@ namespace NATS.Client
                         }
                         catch
                         {
-                            removeTimedoutRequest(request.Id);
+                            removeOutstandingRequest(request.Id);
                             throw;
                         }
 
@@ -2586,7 +2616,7 @@ namespace NATS.Client
             }
         }
 
-        private void removeTimedoutRequest(string requestId)
+        private void removeOutstandingRequest(string requestId)
         {
             lock (mu)
             {
@@ -3562,7 +3592,12 @@ namespace NATS.Client
                             bw.Flush();
                         }
                         catch (Exception) { /* ignore */ }
-                        bw.Dispose();
+
+                        try
+                        {
+                            bw.Dispose();
+                        }
+                        catch (Exception) { /* ignore */ }
                     }
 
                     conn.teardown();

@@ -1,4 +1,17 @@
-﻿using System;
+﻿// Copyright 2016-2018 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -143,19 +156,15 @@ namespace NATS.Client
                 // remove the current server.
                 sList.Remove(s);
 
-                if (maxReconnect > 0 && s.reconnects < maxReconnect)
+                if (maxReconnect == Options.ReconnectForever || 
+                   (maxReconnect > 0 && s.reconnects < maxReconnect))
                 {
                     // if we haven't surpassed max reconnects, add it
                     // to try again.
                     sList.AddLast(s);
                 }
 
-                if (isEmpty())
-                {
-                    return null;
-                }
-
-                currentServer = sList.First();
+                currentServer = isEmpty() ? null : sList.First();
 
                 return currentServer;
             }
@@ -208,6 +217,33 @@ namespace NATS.Client
                 sList.AddLast(s);
 
                 return true;
+            }
+        }
+
+        // removes implict servers NOT found in the provided list. 
+        internal void PruneOutdatedServers(string[] newUrls)
+        {
+            LinkedList<string> ulist = new LinkedList<string>(newUrls);
+
+            lock (poolLock)
+            {
+                var tmp = new Srv[sList.Count];
+                sList.CopyTo(tmp, 0);
+
+                // if a server is implicit and cannot be found in the url
+                // list the remove it unless we are connected to it.
+                foreach (Srv s in tmp)
+                {
+                    // The server returns "<host>:<port>".  We can't compare
+                    // againts Uri.Authority becase that API may strip out 
+                    // ports.
+                    string hp = string.Format("{0}:{1}", s.url.Host, s.url.Port);
+                    if (s.isImplicit && !ulist.Contains(hp) &&
+                        s != currentServer)
+                    {
+                        sList.Remove(s);
+                    }
+                }
             }
         }
 

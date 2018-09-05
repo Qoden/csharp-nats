@@ -1,4 +1,15 @@
-﻿// Copyright 2015 Apcera Inc. All rights reserved.
+﻿// Copyright 2015-2018 The NATS Authors
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 using System;
 using System.Text;
@@ -515,8 +526,17 @@ namespace NATSUnitTests
             {
                 using (IConnection c = utils.DefaultTestConnection)
                 {
-                    Assert.ThrowsAny<Exception>(() => c.Request("foo", null, 500));
+                    Assert.Throws<NATSTimeoutException>(() => c.Request("foo", null, 50));  
                 }
+
+                Options opts = utils.DefaultTestOptions;
+                opts.UseOldRequestStyle = true;
+
+                using (IConnection c = new ConnectionFactory().CreateConnection(opts))
+                {
+                    Assert.Throws<NATSTimeoutException>(() => c.Request("foo", null, 50));
+                }
+
             }
         }
 
@@ -604,7 +624,7 @@ namespace NATSUnitTests
             }
         }
 
-        public async void testRequestAsync(bool useOldRequestStyle)
+        private async void testRequestAsync(bool useOldRequestStyle)
         {
             using (new NATSServer())
             {
@@ -640,7 +660,7 @@ namespace NATSUnitTests
             }
         }
 
-        public async void testRequestAsyncWithOffsets(bool useOldRequestStyle)
+        private async void testRequestAsyncWithOffsets(bool useOldRequestStyle)
         {
             using (new NATSServer())
             {
@@ -703,7 +723,7 @@ namespace NATSUnitTests
             testRequestAsyncWithOffsets(useOldRequestStyle: true);
         }
 
-        public async void testRequestAsyncCancellation(bool useOldRequestStyle)
+        private async void testRequestAsyncCancellation(bool useOldRequestStyle)
         {
             using (new NATSServer())
             {
@@ -789,7 +809,7 @@ namespace NATSUnitTests
             testRequestAsyncCancellation(useOldRequestStyle: true);
         }
 
-        public async void testRequestAsyncTimeout(bool useOldRequestStyle)
+        private async void testRequestAsyncTimeout(bool useOldRequestStyle)
         {
             using (var server = new NATSServer())
             {
@@ -1127,7 +1147,7 @@ namespace NATSUnitTests
                 {
                     string inbox = c.NewInbox();
                     Assert.False(string.IsNullOrWhiteSpace(inbox));
-                    Assert.True(inbox.StartsWith("_INBOX."));
+                    Assert.StartsWith("_INBOX.", inbox);
                 }
             }
         }
@@ -1385,17 +1405,17 @@ namespace NATSUnitTests
             using (new NATSServer())
             {
                 IConnection c = new ConnectionFactory().CreateConnection(urls);
-                Assert.True(c.Opts.Servers[0].Equals(url1));
-                Assert.True(c.Opts.Servers[1].Equals(url2));
-                Assert.True(c.Opts.Servers[2].Equals(url3));
+                Assert.Equal(c.Opts.Servers[0],url1);
+                Assert.Equal(c.Opts.Servers[1],url2);
+                Assert.Equal(c.Opts.Servers[2],url3);
 
                 c.Close();
 
                 urls = url1 + "    , " + url2 + "," + url3;
                 c = new ConnectionFactory().CreateConnection(urls);
-                Assert.True(c.Opts.Servers[0].Equals(url1));
-                Assert.True(c.Opts.Servers[1].Equals(url2));
-                Assert.True(c.Opts.Servers[2].Equals(url3));
+                Assert.Equal(c.Opts.Servers[0],url1);
+                Assert.Equal(c.Opts.Servers[1],url2);
+                Assert.Equal(c.Opts.Servers[2],url3);
                 c.Close();
 
                 c = new ConnectionFactory().CreateConnection(url1);
@@ -1445,9 +1465,6 @@ namespace NATSUnitTests
                 Assert.True(assureClusterFormed(c, 7),
                     "Incomplete cluster with server count: " + c.Servers.Length);
 
-                // Sufficiently test to ensure we don't hit a random false positive
-                // - avoid flappers.
-                bool different = false;
                 for (int i = 0; i < 50; i++)
                 {
                     var c2 = new ConnectionFactory().CreateConnection(opts);
@@ -1455,27 +1472,11 @@ namespace NATSUnitTests
                         "Incomplete cluster with server count: " + c.Servers.Length);
 
                     // The first urls should be the same.
-                    Assert.True(c.Servers[0].Equals(c2.Servers[0]));
-
-                    // now check the others are different (randomized)
-                    for (int j = 1; j < c.Servers.Length; j++)
-                    {
-                        if (!c.Servers[j].Equals(c2.Servers[j]))
-                        {
-                            different = true;
-                            break;
-                        }
-                    }
+                    Assert.Equal(c.Servers[0],c2.Servers[0]);
 
                     c2.Close();
-
-                    // ensure the two connections are different - that randomization
-                    // occurred.
-                    if (different)
-                        break;
                 }
 
-                Assert.True(different, "Connection urls may not be randomized");
                 c.Close();
             }
         }
@@ -1502,7 +1503,7 @@ namespace NATSUnitTests
 
                 Assert.True(c.Servers.Length == 1);
                 // check that credentials are stripped.
-                Assert.True(c.Servers[0].Equals("nats://127.0.0.1:4223"));
+                Assert.Equal("nats://127.0.0.1:4223", c.Servers[0]);
 
                 // build an independent cluster
                 using (NATSServer s2 = new NATSServer("-a localhost -p 4224 --cluster nats://127.0.0.1:4666 --routes nats://127.0.0.1:4555"))
@@ -1513,7 +1514,7 @@ namespace NATSUnitTests
 
                     // Ensure the first server remains in place and has not been
                     // randomized.
-                    Assert.True(c.Servers[0].Equals("nats://127.0.0.1:4223"));
+                    Assert.Equal("nats://127.0.0.1:4223", c.Servers[0]);
                     Assert.True(c.Servers.Length == 2);
                     Assert.True(c.DiscoveredServers.Length == 1);
 
@@ -1522,9 +1523,64 @@ namespace NATSUnitTests
                     s1.Shutdown();
                     Assert.True(evReconnect.WaitOne(10000));
                     Assert.True(newUrl != null);
-                    Assert.False(newUrl.Equals(opts.Url));
+                    Assert.Contains("4224", c.ConnectedUrl);
                 }
 
+                c.Close();
+            }
+        }
+
+        [Fact]
+        public void TestAsyncInfoProtocolPrune()
+        {
+            var opts = utils.DefaultTestOptions;
+            opts.Url = "nats://127.0.0.1:4221";
+
+            AutoResetEvent evDS = new AutoResetEvent(false);
+            opts.ServerDiscoveredEventHandler = (o, a) =>{evDS.Set();};
+
+            AutoResetEvent evRC = new AutoResetEvent(false);
+            opts.ReconnectedEventHandler = (o, a) => { evRC.Set(); };
+            // Create a cluster of 3 nodes, then take one implicit server away
+            // and add another.  The server removed should no longer be in the
+            // discovered servers list.
+            using (NATSServer s1 = new NATSServer("-a 127.0.0.1 -p 4221 --cluster nats://127.0.0.1:4551 --routes nats://127.0.0.1:4552"),
+                              s2 = new NATSServer("-a 127.0.0.1 -p 4222 --cluster nats://127.0.0.1:4552 --routes nats://127.0.0.1:4551"),
+                              s3 = new NATSServer("-a 127.0.0.1 -p 4223 --cluster nats://127.0.0.1:4553 --routes nats://127.0.0.1:4551"))
+            {
+
+
+                var c = new ConnectionFactory().CreateConnection(opts);
+                Assert.True(assureClusterFormed(c, 3),
+                    "Incomplete cluster with server count: " + c.Servers.Length);
+
+                // shutdown server 2
+                s2.Shutdown();
+
+                using (NATSServer s4 = new NATSServer("-a 127.0.0.1 -p 4224 --cluster nats://127.0.0.1:4554 --routes nats://127.0.0.1:4551"))
+                {
+                    // wait for the update with new server to check.
+                    Assert.True(evDS.WaitOne(10000));
+
+                    // The server on port 4223 should be pruned out.
+                    //
+                    // Discovered servers should contain:
+                    // ["nats://127.0.0.1:4222",
+                    //  "nats://127.0.0.1:4224"]
+                    //
+                    LinkedList<string> discoveredServers = new LinkedList<string>(c.DiscoveredServers);
+                    Assert.True(discoveredServers.Count == 2);
+                    Assert.True(discoveredServers.Contains("nats://127.0.0.1:4223"));
+                    Assert.True(discoveredServers.Contains("nats://127.0.0.1:4224"));
+
+                    // shutdown server 1 and wait for reconnect.
+                    s1.Shutdown();
+                    Assert.True(evRC.WaitOne(10000));
+                    // Make sure we did NOT delete our expclitly configured server.
+                    LinkedList<string> servers = new LinkedList<string>(c.Servers);
+                    Assert.True(servers.Count == 3); // explicit server is still there.
+                    Assert.True(servers.Contains("nats://127.0.0.1:4221"));
+                }
                 c.Close();
             }
         }
